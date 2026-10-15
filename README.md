@@ -62,7 +62,26 @@ environment variables.
 | `resume_window_seconds` | `3600` | Budget window |
 | `fence_ttl_seconds` | `900` | Do not re-resume the same abruption inside this window |
 | `disk_free_floor_mb` | `1024` | Below this, the disk is a blocking cause |
+| `stall_seconds` | `300` | A live turn with no logged progress for this long is a stall |
+| `auto_recover_fences` | `true` | Acknowledge a fenced admission so its queued successor runs |
 | `pause_file` | `""` | If set and the file exists, all resumes pause |
+
+## Stalls
+
+Two classes, both read from `state.db` + the log tail:
+
+- **post-fence** — an admission is fenced `unknown` (a process died mid-turn) and a *queued successor*
+  waits behind it. This is the visible stall: nothing runs until the fence is acknowledged. The
+  plugin recovers it with the harness' own `hermes sessions discard <id> --yes`, then reads the store
+  back to prove `unknown` → terminal and the successor `started`.
+- **pre-fence** — a live `started` turn with no logged progress past `stall_seconds`. The harness'
+  turn watchdog covers a provider wait but not a silent *tool* call, so the bound is the plugin's.
+  This is reported with its attribution, never interrupted.
+
+Attribution comes from the log tail: **provider** (`waiting for non-streaming API response`),
+**tool** (the workspace checkpoint's `git` wedge, or a tool left open after an API call),
+**infrastructure** (a planned gateway stop / `SIGTERM`). A planned restart is infrastructure, **not** a
+user stop — the turn stays resumable.
 
 ## The tool and the command
 
@@ -73,6 +92,8 @@ environment variables.
 - `ledger` — the recent decision log.
 - `diagnose <session_id>` — the background causes for one session.
 - `resume <session_id>` — force a gated resume of one session.
+- `stalls` — every stalled session, its class and attribution.
+- `recover <session_id>` — acknowledge a fenced admission so its successor can run.
 
 ## Where it can resume, and why
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import sqlite3
 
-from . import db, store
+from . import db, logs, store
 from .config import Config
 from .model import Candidate, Verdict
 
@@ -35,6 +35,7 @@ def classify(
     candidate: Candidate,
     now: float,
     cfg: Config,
+    events: list | None = None,
 ) -> Verdict:
     session_id = candidate.session_id
     sess = db.session_row(conn, session_id) or {}
@@ -46,7 +47,13 @@ def classify(
     if store.stopped_any(ledger, stop_ids, candidate.signal_ts - cfg.resume_window_seconds):
         return Verdict(False, "manual stop recorded for this session")
 
-    # 2. A surface that closed on purpose.
+    # 2. A planned gateway restart / shutdown killed the turn — infrastructure, NOT a user stop.
+    #    This must be checked BEFORE the deliberate-close branch: a planned app restart can leave the
+    #    surface's own close reason behind, which would otherwise read as a user decision.
+    if events and logs.planned_restart(events, candidate.signal_ts - cfg.resume_window_seconds):
+        return Verdict(True, "infrastructure restart killed the turn (planned gateway stop)")
+
+    # 3. A surface that closed on purpose.
     end_reason = (sess.get("end_reason") or "").strip()
     if end_reason in db.DELIBERATE_END_REASONS:
         return Verdict(False, f"session closed deliberately ({end_reason})")

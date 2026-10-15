@@ -105,6 +105,11 @@ def resume_count(path, *, since: float, session_id: str | None = None) -> int:
     return len(_recent(read_all(path), {"resume"}, session_id, since))
 
 
+def recently_recorded(path, kind: str, session_id: str, ttl: float, now: float) -> bool:
+    """True when a record of ``kind`` for the session is newer than ``ttl`` — a report de-duplicator."""
+    return bool(_recent(read_all(path), {kind}, session_id, now - ttl))
+
+
 def fenced(path, session_id: str, source: str, reason: str, *, ttl: float, now: float) -> bool:
     """True when this exact abruption was already resumed inside the fence TTL."""
     since = now - ttl

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from . import _fixture
-from triage import classify, db, store
+from triage import classify, db, logs, store
 from triage.config import Config
 from triage.model import Candidate
 
@@ -72,6 +72,22 @@ class ClassifyTest(unittest.TestCase):
         verdict = classify.classify(conn, self.ledger, self.candidate, self.now, CFG)
         self.assertFalse(verdict.involuntary)
         self.assertIn("already completed", verdict.why)
+
+    def test_planned_restart_overrides_a_surface_close(self):
+        conn = self._db(sessions=[{"id": "s1", "session_key": "k1", "end_reason": "agent_close"}])
+        events = [logs.Event(ts=self.now - 60, level="WARNING", session_id=None,
+                             logger="gateway.run", msg="Received SIGTERM as a planned gateway stop")]
+        verdict = classify.classify(conn, self.ledger, self.candidate, self.now, CFG, events)
+        self.assertTrue(verdict.involuntary)
+        self.assertIn("infrastructure", verdict.why)
+
+    def test_recorded_stop_still_wins_over_a_restart(self):
+        store.append(self.ledger, {"kind": "stop", "session_key": "k1", "ts": self.now - 100})
+        conn = self._db(sessions=[{"id": "s1", "session_key": "k1"}])
+        events = [logs.Event(ts=self.now - 60, level="WARNING", session_id=None,
+                             logger="gateway.run", msg="Received SIGTERM as a planned gateway stop")]
+        verdict = classify.classify(conn, self.ledger, self.candidate, self.now, CFG, events)
+        self.assertFalse(verdict.involuntary)
 
     def test_user_message_before_interruption_does_not_supersede(self):
         conn = self._db(

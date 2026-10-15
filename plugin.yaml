@@ -1,5 +1,5 @@
 name: session-triage
-version: "0.1.0"
+version: "0.1.1"
 description: >-
   Detect abandoned Hermes sessions, diagnose the background cause, repair it, and resume the turn
   once — never resuming a session the user stopped or closed deliberately.

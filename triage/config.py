@@ -64,6 +64,10 @@ class Config:
     disk_free_floor_mb: int = 1024
     gateway_stale_seconds: int = 180
 
+    # Stall detection: a live turn with no logged progress for this long is a stall.
+    stall_seconds: int = 300
+    auto_recover_fences: bool = True
+
     # Optional operator kill-switch: a file path whose existence pauses all resumes.
     pause_file: str = ""
 
@@ -97,5 +101,7 @@ class Config:
             fence_ttl_seconds=_as_int(raw("fence_ttl_seconds", 900), 900),
             disk_free_floor_mb=_as_int(raw("disk_free_floor_mb", 1024), 1024),
             gateway_stale_seconds=_as_int(raw("gateway_stale_seconds", 180), 180),
+            stall_seconds=_as_int(raw("stall_seconds", 300), 300),
+            auto_recover_fences=_as_bool(raw("auto_recover_fences", True), True),
             pause_file=_as_str(raw("pause_file", ""), ""),
         )

@@ -23,7 +23,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from .triage import classify, db, detect, diagnose, engine, heal, resume, store
+from .triage import classify, db, detect, diagnose, engine, heal, logs, resume, stall, store
 from .triage.config import Config
 
 logger = logging.getLogger("plugin.session-triage")
@@ -37,15 +37,16 @@ _TOOL_SCHEMA = {
         "Inspect and drive abandoned-session recovery. `status` reports config and whether a live "
         "injector is present; `scan` runs a dry-run pass (what would be resumed, and why); `ledger` "
         "returns recent decisions; `diagnose <session_id>` probes the background causes; "
-        "`resume <session_id>` forces a gated resume. A session the user stopped or closed "
-        "deliberately is never resumed."
+        "resume <session_id>` forces a gated resume; `stalls` lists stalled sessions with their "
+        "attribution; `recover <session_id>` acknowledges a fenced admission so its queued successor "
+        "can run. A session the user stopped or closed deliberately is never resumed."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["status", "scan", "ledger", "diagnose", "resume"],
+                "enum": ["status", "scan", "ledger", "diagnose", "resume", "stalls", "recover"],
                 "description": "The operation to perform.",
             },
             "session_id": {
@@ -207,7 +208,8 @@ def _targeted_resume(ctx, config: Config, ledger: str, state_db: Path, home: str
             if target is None:
                 return {"ok": False, "error": "no abruption candidate for that session id",
                         "candidates": [c.session_id for c in candidates]}
-            verdict = classify.classify(conn, ledger, target, now, config)
+            events = logs.iter_events(logs.log_paths(home))
+            verdict = classify.classify(conn, ledger, target, now, config, events)
             if not verdict.involuntary:
                 return {"ok": False, "action": "skip", "reason": verdict.why}
             diagnosis = diagnose.diagnose(conn, home, target.session_id, now, config)
@@ -277,6 +279,34 @@ def _handle(ctx, cfg_get, ledger: str, state_db: Path, home: str, state_dir: Pat
         if not session_id:
             return {"ok": False, "error": "session_id is required"}
         return _targeted_resume(ctx, config, ledger, state_db, home, state_dir, session_id)
+    if action == "stalls":
+        if not state_db.exists():
+            return {"ok": False, "error": f"state.db not found at {state_db}"}
+        events = logs.iter_events(logs.log_paths(home))
+        conn = db.connect(state_db)
+        try:
+            found = stall.find_stalls(conn, events, time.time(), config)
+            return {"ok": True, "count": len(found), "stalls": [
+                {"session_id": item.session_id, "kind": item.kind,
+                 "attribution": item.attribution, "detail": item.detail,
+                 "evidence": item.evidence, "successor": item.has_queued_successor}
+                for item in found]}
+        finally:
+            conn.close()
+    if action == "recover":
+        session_id = (args or {}).get("session_id")
+        if not session_id:
+            return {"ok": False, "error": "session_id is required"}
+        ok, output = stall.recover_fence(session_id)
+        resolved = ok
+        if state_db.exists():
+            conn = db.connect(state_db)
+            try:
+                resolved = ok and stall.fence_resolved(conn, session_id)
+            finally:
+                conn.close()
+        return {"ok": resolved, "output": output,
+                "reason": "" if resolved else "recovery did not clear the fence"}
     return {"ok": False, "error": f"unknown action: {action}"}
 
 
@@ -370,8 +400,8 @@ def register(ctx) -> None:
                               indent=2, default=str)
 
         ctx.register_command("triage", _command,
-                             description="Session triage: status | scan | resume <session_id>",
-                             args_hint="[status|scan|ledger|resume <session_id>]")
+                             description="Session triage: status | scan | stalls | resume|recover <session_id>",
+                             args_hint="[status|scan|ledger|stalls|resume|recover <session_id>]")
     except Exception:
         logger.warning("session-triage: command registration failed", exc_info=True)
 
