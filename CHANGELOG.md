@@ -28,6 +28,14 @@
   `admission_conflict` / `runtime_draining`), which never reaches an admission row.
 - The ledger is bounded: it rotates to `ledger.jsonl.1` past `SESSION_TRIAGE_LEDGER_MAX_BYTES`
   (default 1 MB), keeping the previous rotation so a recent stop and a resume fence survive it.
+- **A resume is verified, not assumed.** `resumed` only ever meant the host accepted the injection. A new
+  stage settles each resume against the store: `resume_verified` once a completed assistant reply exists
+  after it, `resume_failed` once `resume_verify_seconds` (default 600) has passed with none. Both counts
+  ride the heartbeat, so "resumed" can no longer be read as "fixed".
+- `db.READ_COLUMNS` names every table and column the stages read, and `tests/test_schema_conformance.py`
+  checks that map against a **live** `state.db` (skipping when there is none to read). A rename in Hermes
+  is now a failing test rather than a silently dead detector — the failure a hand-written fixture cannot
+  see, because the fixture and the code drift away from the host together.
 
 ### Changed
 

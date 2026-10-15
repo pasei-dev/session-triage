@@ -156,6 +156,39 @@ def fenced(path, session_id: str, source: str, reason: str, *, ttl: float, now: 
     return False
 
 
+#: The kinds that settle a resume.
+_VERIFICATION_KINDS = frozenset({"resume_verified", "resume_failed"})
+
+
+def resume_key(session_id: str, ts: float) -> str:
+    """Identity of one resume record, so its verification can be matched back to it."""
+    return f"{session_id}@{float(ts):.6f}"
+
+
+def unverified_resumes(path, *, since: float) -> list[dict[str, Any]]:
+    """Resume records nothing has checked yet, oldest first, each carrying its ``resume_id``.
+
+    An injection the host accepted is not evidence the session recovered — only a reply is. A
+    resume therefore stays unverified until a later pass has looked for the turn it was meant to
+    produce, which is what keeps ``resumed`` from reading as ``recovered``.
+    """
+    records = read_all(path)
+    settled = {rec.get("resume_id") for rec in records
+               if rec.get("kind") in _VERIFICATION_KINDS and rec.get("resume_id")}
+    out: list[dict[str, Any]] = []
+    for rec in records:
+        if rec.get("kind") != "resume" or rec.get("ok") is not True:
+            continue
+        ts = float(rec.get("ts") or 0.0)
+        if ts < since or not rec.get("session_id"):
+            continue
+        resume_id = resume_key(rec["session_id"], ts)
+        if resume_id in settled:
+            continue
+        out.append({**rec, "resume_id": resume_id})
+    return out
+
+
 @contextmanager
 def pass_lock(data_dir: str | os.PathLike[str]):
     """Serialize a triage pass across threads and processes sharing the profile."""

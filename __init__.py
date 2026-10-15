@@ -337,7 +337,8 @@ def _write_heartbeat(state_dir: Path, ctx, config: Config, *, last_pass=None,
         pass
 
 
-_STAT_KEYS = ("considered", "resumed", "skipped", "deferred", "healed", "stalls", "recovered")
+_STAT_KEYS = ("considered", "resumed", "skipped", "deferred", "healed", "stalls", "recovered",
+              "resume_verified", "resume_failed")
 
 
 def _start_worker(ctx, cfg_get, ledger: str, state_db: Path, home: str, state_dir: Path,
