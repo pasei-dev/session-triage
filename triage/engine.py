@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Optional
 
-from . import classify, detect, diagnose, heal, logs, resume, stall, store
+from . import classify, db, detect, diagnose, heal, logs, resume, stall, store
 from .config import Config
 
 Inject = Callable[..., bool]
@@ -27,6 +27,8 @@ class PassResult:
     healed: int = 0
     stalls: int = 0
     recovered: int = 0
+    resume_verified: int = 0
+    resume_failed: int = 0
     actions: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -38,6 +40,42 @@ def _record(ledger: str, entry: dict[str, Any]) -> None:
         store.append(ledger, entry)
     except Exception:
         pass
+
+
+def _verify_resumes(conn, ledger, now, cfg, result, log) -> None:
+    """Ask whether the resumes already issued actually produced a reply.
+
+    An injection the host accepted is not a recovery — the session can die again the moment it
+    wakes. Each resume is settled here exactly once: **verified** when a completed assistant reply
+    exists after it, **failed** when the grace has passed with none. That is what stops the
+    ``resumed`` count from being read as ``fixed``.
+    """
+    try:
+        pending = store.unverified_resumes(ledger, since=now - cfg.resume_window_seconds)
+    except Exception:
+        return
+    for record in pending:
+        session_id = record.get("session_id")
+        ts = float(record.get("ts") or 0.0)
+        if not session_id:
+            continue
+        try:
+            replied = db.last_success_ts(conn, session_id) > ts
+        except Exception:
+            continue
+        try:
+            if replied:
+                result.resume_verified += 1
+                _record(ledger, {"kind": "resume_verified", "session_id": session_id,
+                                 "resume_id": record["resume_id"], "took_s": round(now - ts, 1)})
+            elif (now - ts) > cfg.resume_verify_seconds:
+                result.resume_failed += 1
+                _record(ledger, {"kind": "resume_failed", "session_id": session_id,
+                                 "resume_id": record["resume_id"], "age_s": round(now - ts, 1)})
+                log(f"session-triage: resume on {session_id} produced no reply in "
+                    f"{cfg.resume_verify_seconds}s")
+        except Exception:
+            continue
 
 
 def _resume_candidates(conn, ledger, now, cfg, events, inject, result, log, hermes_home) -> None:
@@ -167,6 +205,7 @@ def run_pass(
     except Exception:
         events = []
 
+    _verify_resumes(conn, ledger, now, cfg, result, log)
     _resume_candidates(conn, ledger, now, cfg, events, inject, result, log, hermes_home)
     _stalls(conn, ledger, now, cfg, events, result, log)
     return result

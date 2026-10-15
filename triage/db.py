@@ -34,6 +34,19 @@ SESSION_COLUMNS = (
     "model", "compression_fallback_streak", "compression_recovery_deadline",
 )
 
+#: Every table and column the stages read, ``sessions`` included. A hand-written fixture proves only
+#: that it agrees with this file — the two can drift away from Hermes together, which is exactly how
+#: one renamed column left detection silently dead. ``tests/test_schema_conformance.py`` checks this
+#: map against a *live* ``state.db`` instead, so a rename in the host is a failing test, not a quiet
+#: no-op.
+READ_COLUMNS: dict[str, tuple[str, ...]] = {
+    "sessions": SESSION_COLUMNS,
+    "messages": ("session_id", "role", "content", "reasoning_content", "timestamp", "finish_reason"),
+    "session_turn_leases": ("conversation_id", "holder", "acquired_at", "expires_at"),
+    "session_admissions": ("seq", "target_session_id", "status", "intent"),
+    "gateway_heartbeats": ("backend_id", "pid", "started_at", "last_heartbeat"),
+}
+
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
     """Open ``state.db`` read-only. Raises if the file does not exist."""

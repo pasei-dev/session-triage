@@ -24,7 +24,9 @@ class SessionRowTest(unittest.TestCase):
 
     def test_fixture_has_every_column_the_plugin_reads(self):
         conn = self._conn()
-        self.assertTrue(set(db.SESSION_COLUMNS) <= db.table_columns(conn, "sessions"))
+        for table, columns in db.READ_COLUMNS.items():
+            missing = [name for name in columns if name not in db.table_columns(conn, table)]
+            self.assertEqual(missing, [], f"fixture table {table} lacks {missing}")
 
     def test_session_row_returns_a_row(self):
         conn = self._conn(sessions=[{"id": "s1", "session_key": "k1", "last_activity_at": 123.0}])
