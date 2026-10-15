@@ -32,8 +32,9 @@ detect ──▶ classify ──▶ diagnose ──▶ heal ──▶ gate ─�
 - **Resume** is a plain user-role turn injected into the session (the same mechanism `/heartbeat`
   uses), so message alternation and prompt caching hold. It is fenced per abruption and budgeted per
   session and globally.
-- **Verify** records every decision in a bounded ledger and, where it can, reads the store back to
-  prove the action landed.
+- **Verify** records every decision in a bounded ledger, reads the store back to prove a fence recovery
+  landed, and settles every resume against the transcript: a completed assistant reply after it marks
+  the resume verified, the grace passing with none marks it failed.
 
 ## Install
 
@@ -66,6 +67,7 @@ environment variables.
 | `max_resumes_total` | `20` | Global resume budget inside the window |
 | `resume_window_seconds` | `3600` | Budget window |
 | `fence_ttl_seconds` | `900` | Do not re-resume the same abruption inside this window |
+| `resume_verify_seconds` | `600` | A resume with no reply after this long is recorded as failed |
 | `disk_free_floor_mb` | `1024` | Below this, the disk is a blocking cause |
 | `state_db_warn_mb` | `1500` | Above this, `state.db` is reported as a cause of slow turns |
 | `checkpoint_lock_stale_seconds` | `120` | A workspace-checkpoint lock older than this is reported |
@@ -113,6 +115,11 @@ so nobody has to guess whether the session continued on its own or was nudged. A
 own note back (`db.max_user_ts`) so it is never mistaken for a newer user turn that would supersede the
 interruption. The decision is also written to the ledger, so `/triage ledger` gives the same fact in
 machine-readable form.
+
+A resume is not assumed to have worked. The next pass looks for a completed reply after it: one means
+the resume is recorded `resume_verified`, and `resume_verify_seconds` passing without one records
+`resume_failed`. Both counts appear in the heartbeat, so a resume that woke a session which died again
+reads as a failure rather than a fix.
 
 ## The tool and the command
 

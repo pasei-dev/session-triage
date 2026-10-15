@@ -59,6 +59,8 @@ class Config:
     max_resumes_total: int = 20
     resume_window_seconds: int = 3600
     fence_ttl_seconds: int = 900
+    #: How long a resume may stay unproven before it is recorded as producing no reply.
+    resume_verify_seconds: int = 600
 
     # Diagnosis thresholds.
     disk_free_floor_mb: int = 1024
@@ -101,6 +103,7 @@ class Config:
             max_resumes_total=_as_int(raw("max_resumes_total", 20), 20),
             resume_window_seconds=_as_int(raw("resume_window_seconds", 3600), 3600),
             fence_ttl_seconds=_as_int(raw("fence_ttl_seconds", 900), 900),
+            resume_verify_seconds=_as_int(raw("resume_verify_seconds", 600), 600),
             disk_free_floor_mb=_as_int(raw("disk_free_floor_mb", 1024), 1024),
             gateway_stale_seconds=_as_int(raw("gateway_stale_seconds", 180), 180),
             state_db_warn_mb=_as_int(raw("state_db_warn_mb", 1500), 1500),
