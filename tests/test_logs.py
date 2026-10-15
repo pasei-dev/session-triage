@@ -69,5 +69,17 @@ class LogsTest(unittest.TestCase):
         self.assertTrue(logs.planned_restart(self._events(), 0.0))
 
 
+    def test_paused_sessions_extracts_id_and_reason(self):
+        self._write([
+            _line("2026-10-15 21:13:36,150", None, "gateway.session_local_recovery",
+                  "Local session sX paused: admission_conflict", level="WARNING"),
+            _line("2026-10-15 21:13:02,977", None, "gateway.session_authority",
+                  "Session sY paused: runtime_draining", level="WARNING"),
+        ])
+        found = {sid: reason for sid, reason, _ts in logs.paused_sessions(self._events())}
+        self.assertEqual(found.get("sX"), "admission_conflict")
+        self.assertEqual(found.get("sY"), "runtime_draining")
+
+
 if __name__ == "__main__":
     unittest.main()

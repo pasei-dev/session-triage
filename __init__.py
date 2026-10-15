@@ -312,36 +312,61 @@ def _handle(ctx, cfg_get, ledger: str, state_db: Path, home: str, state_dir: Pat
 
 # --------------------------------------------------------------------------- worker
 
-def _write_heartbeat(state_dir: Path, ctx, config: Config) -> None:
-    """A worker liveness stamp the `status` action can read back — a silent thread is unverifiable."""
+def _write_heartbeat(state_dir: Path, ctx, config: Config, *, last_pass=None,
+                     last_error: str = "", passes: int | None = None) -> None:
+    """A worker liveness stamp the `status` action can read back — a silent thread is unverifiable.
+
+    ``last_pass`` carries the counts from the most recent sweep (``considered``, ``resumed``,
+    ``deferred`` …) and ``last_error`` any failure, so a sweep that has gone inert is visible
+    instead of looking identical to a healthy one.
+    """
     try:
-        (Path(state_dir) / "worker.json").write_text(json.dumps({
+        payload: dict = {
             "pid": os.getpid(),
             "ts": time.time(),
             "enabled": config.enabled,
             "injector": _can_inject(ctx),
-        }))
+            "last_error": last_error,
+        }
+        if passes is not None:
+            payload["passes"] = passes
+        if last_pass is not None:
+            payload["last_pass"] = last_pass
+        (Path(state_dir) / "worker.json").write_text(json.dumps(payload))
     except Exception:
         pass
+
+
+_STAT_KEYS = ("considered", "resumed", "skipped", "deferred", "healed", "stalls", "recovered")
 
 
 def _start_worker(ctx, cfg_get, ledger: str, state_db: Path, home: str, state_dir: Path,
                   stop: threading.Event) -> threading.Thread:
     def loop() -> None:
         first_pass = True
+        passes = 0
         while not stop.is_set():
             try:
                 config = cfg_get()
-                _write_heartbeat(state_dir, ctx, config)
                 if first_pass:
                     first_pass = False
+                    _write_heartbeat(state_dir, ctx, config, passes=passes)
                     if stop.wait(max(0, config.startup_grace_seconds)):
                         return
+                stats = {key: 0 for key in _STAT_KEYS}
+                error = ""
                 if config.enabled and _can_inject(ctx):
+                    passes += 1
                     try:
-                        _run_guarded(ctx, config, ledger, state_db, home, state_dir)
-                    except Exception:
-                        logger.debug("session-triage: worker pass failed", exc_info=True)
+                        result = _run_guarded(ctx, config, ledger, state_db, home, state_dir)
+                    except Exception as exc:
+                        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                    if result.get("ok"):
+                        stats = {key: result.get(key, 0) for key in _STAT_KEYS}
+                    else:
+                        error = str(result.get("error") or "pass failed")
+                _write_heartbeat(state_dir, ctx, config, last_pass=stats, last_error=error,
+                                 passes=passes)
                 interval = max(5, config.interval_seconds)
             except Exception:
                 logger.debug("session-triage: worker iteration failed", exc_info=True)

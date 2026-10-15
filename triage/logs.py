@@ -150,3 +150,21 @@ def planned_restart(events: list[Event], since: float) -> bool:
     """True when a planned gateway restart / shutdown is evidenced after ``since``."""
     return any(event.ts >= since and any(marker in event.msg for marker in INFRA_MARKERS)
                for event in events)
+
+
+#: A session the host paused — an admission replay refused, or the gateway draining for a restart.
+#: Such a line names the session *inside* the message, not the ``[sid]`` bracket, and never reaches
+#: an admission row, so the store lookups miss it; the log is the only place it appears.
+_PAUSE_RE = re.compile(r"session\s+([0-9A-Za-z_\-]+)\s+paused:\s*([a-z_]+)", re.IGNORECASE)
+
+
+def paused_sessions(events: list[Event], since: float = 0.0) -> list[tuple[str, str, float]]:
+    """``(session_id, reason, ts)`` for each ``session <id> paused: <reason>`` line at/after ``since``."""
+    found: list[tuple[str, str, float]] = []
+    for event in events:
+        if event.ts < since:
+            continue
+        match = _PAUSE_RE.search(event.msg)
+        if match:
+            found.append((match.group(1), match.group(2).lower(), event.ts))
+    return found

@@ -124,5 +124,22 @@ class PluginTest(unittest.TestCase):
         ctx.unloaded()
 
 
+    def test_heartbeat_carries_pass_stats(self):
+        import json
+
+        # No register(): that would start the worker thread, which writes its own heartbeat and races
+        # this assertion. _write_heartbeat is exercised directly (register() is what would mkdir the dir).
+        state_dir = self.tmp / "data"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        ctx = _Ctx(state_dir, _Manager(gateway=True))
+        self.plugin._write_heartbeat(state_dir, ctx, self.plugin.Config(),
+                                     last_pass={"considered": 3, "resumed": 1},
+                                     last_error="", passes=2)
+        data = json.loads((self.tmp / "data" / "worker.json").read_text())
+        self.assertEqual(data["last_pass"]["resumed"], 1)
+        self.assertEqual(data["passes"], 2)
+        self.assertEqual(data["last_error"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

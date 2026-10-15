@@ -53,5 +53,18 @@ class StoreTest(unittest.TestCase):
                                       ttl=900, now=now))
 
 
+    def test_ledger_rotates_and_stays_bounded(self):
+        import os
+
+        os.environ["SESSION_TRIAGE_LEDGER_MAX_BYTES"] = "200"
+        self.addCleanup(os.environ.pop, "SESSION_TRIAGE_LEDGER_MAX_BYTES", None)
+        for i in range(50):
+            store.append(self.ledger, {"kind": "skip", "session_id": f"s{i}"})
+        self.assertTrue((self.dir / "ledger.jsonl.1").exists())
+        records = store.read_all(self.ledger)
+        self.assertLess(len(records), 50)  # old lines are dropped, not kept forever
+        self.assertEqual(records[-1]["session_id"], "s49")
+
+
 if __name__ == "__main__":
     unittest.main()

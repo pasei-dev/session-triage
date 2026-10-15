@@ -63,6 +63,8 @@ class Config:
     # Diagnosis thresholds.
     disk_free_floor_mb: int = 1024
     gateway_stale_seconds: int = 180
+    state_db_warn_mb: int = 1500
+    checkpoint_lock_stale_seconds: int = 120
 
     # Stall detection: a live turn with no logged progress for this long is a stall.
     stall_seconds: int = 300
@@ -101,6 +103,10 @@ class Config:
             fence_ttl_seconds=_as_int(raw("fence_ttl_seconds", 900), 900),
             disk_free_floor_mb=_as_int(raw("disk_free_floor_mb", 1024), 1024),
             gateway_stale_seconds=_as_int(raw("gateway_stale_seconds", 180), 180),
+            state_db_warn_mb=_as_int(raw("state_db_warn_mb", 1500), 1500),
+            checkpoint_lock_stale_seconds=_as_int(
+                raw("checkpoint_lock_stale_seconds", 120), 120
+            ),
             stall_seconds=_as_int(raw("stall_seconds", 300), 300),
             auto_recover_fences=_as_bool(raw("auto_recover_fences", True), True),
             pause_file=_as_str(raw("pause_file", ""), ""),

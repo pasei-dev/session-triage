@@ -30,15 +30,47 @@ _PROCESS_LOCKS_GUARD = threading.Lock()
 
 LEDGER_NAME = "ledger.jsonl"
 
+#: The ledger is bounded: once it grows past this many bytes it rotates to ``<name>.1`` and a fresh
+#: file starts. The previous rotation is kept (a recent stop and a resume fence survive it) and any
+#: older one is dropped. ``SESSION_TRIAGE_LEDGER_MAX_BYTES=0`` disables rotation.
+_MAX_BYTES_DEFAULT = 1_000_000
+_ROTATED_SUFFIX = ".1"
+
 
 def ledger_path(data_dir: str | os.PathLike[str]) -> Path:
     return Path(data_dir) / LEDGER_NAME
+
+
+def _max_bytes() -> int:
+    raw = os.environ.get("SESSION_TRIAGE_LEDGER_MAX_BYTES")
+    try:
+        value = int(raw) if raw is not None else _MAX_BYTES_DEFAULT
+    except (TypeError, ValueError):
+        value = _MAX_BYTES_DEFAULT
+    return max(0, value)
+
+
+def _rotated_path(path: Path) -> Path:
+    return path.with_name(path.name + _ROTATED_SUFFIX)
+
+
+def _rotate_if_needed(path: Path) -> None:
+    """Rotate the ledger to ``.1`` once it is over the bound. ``os.replace`` is atomic."""
+    limit = _max_bytes()
+    if limit <= 0:
+        return
+    try:
+        if path.exists() and path.stat().st_size > limit:
+            os.replace(path, _rotated_path(path))
+    except OSError:
+        pass
 
 
 def append(path: str | os.PathLike[str], record: dict[str, Any]) -> None:
     """Append one JSON record. A single ``write`` of one short line is atomic on POSIX."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _rotate_if_needed(path)
     record = dict(record)
     record.setdefault("ts", time.time())
     line = json.dumps(record, separators=(",", ":"), default=str) + "\n"
@@ -47,21 +79,26 @@ def append(path: str | os.PathLike[str], record: dict[str, Any]) -> None:
 
 
 def read_all(path: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    """Every record, oldest first: the rotated file (``.1``) then the current ledger."""
     path = Path(path)
-    if not path.exists():
-        return []
     records: list[dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                item = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(item, dict):
-                records.append(item)
+    for source in (_rotated_path(path), path):
+        if not source.exists():
+            continue
+        try:
+            with open(source, "r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(item, dict):
+                        records.append(item)
+        except OSError:
+            continue
     return records
 
 

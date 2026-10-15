@@ -18,7 +18,7 @@ SCHEMA = """
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY, session_key TEXT, end_reason TEXT, origin_json TEXT,
     last_activity_at REAL, started_at REAL, model TEXT,
-    compression_failure_streak INTEGER DEFAULT 0, compression_recovery_deadline REAL
+    compression_fallback_streak INTEGER DEFAULT 0, compression_recovery_deadline REAL
 );
 CREATE TABLE session_turn_leases (
     conversation_id TEXT PRIMARY KEY, holder TEXT NOT NULL,
@@ -51,11 +51,11 @@ def make_db(path, *, sessions=(), leases=(), admissions=(), messages=(), heartbe
     for row in sessions:
         conn.execute(
             "insert into sessions(id, session_key, end_reason, origin_json, last_activity_at,"
-            " started_at, model, compression_failure_streak, compression_recovery_deadline)"
+            " started_at, model, compression_fallback_streak, compression_recovery_deadline)"
             " values(?,?,?,?,?,?,?,?,?)",
             (row["id"], row.get("session_key"), row.get("end_reason"), row.get("origin_json"),
              row.get("last_activity_at"), row.get("started_at"), row.get("model"),
-             row.get("compression_failure_streak", 0), row.get("compression_recovery_deadline")),
+             row.get("compression_fallback_streak", 0), row.get("compression_recovery_deadline")),
         )
     for row in leases:
         conn.execute(

@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from . import detect, store
 from .config import Config
-from .model import Candidate, Diagnosis
+from .model import Candidate, Diagnosis, RESUME_SENTINEL
 
 Inject = Callable[..., bool]
 
@@ -44,6 +44,12 @@ def _has(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def build_prompt(candidate: Candidate, diagnosis: Diagnosis) -> str:
+    """The resume turn.
+
+    A plain user-role message (so message alternation and prompt caching hold), prefixed with
+    ``RESUME_SENTINEL`` so it reads as a plugin note in the transcript and is never mistaken for a
+    real user message by ``db.max_user_ts``.
+    """
     causes = ", ".join(diagnosis.causes) or "an interruption"
     fixed = ", ".join(diagnosis.fixed)
     tail = (
@@ -52,7 +58,8 @@ def build_prompt(candidate: Candidate, diagnosis: Diagnosis) -> str:
         else ""
     )
     return (
-        "[session-triage] Your previous turn in this session was interrupted "
+        f"{RESUME_SENTINEL} Automated note: this session was auto-resumed by the session-triage "
+        f"plugin after an interruption. Your previous turn was interrupted "
         f"({candidate.reason}; diagnosed cause: {causes}).{tail} "
         "Continue from where you left off. Do not repeat side effects that already ran — verify "
         "them first (read the file, re-run the check, inspect the git state) and only redo what is "
