@@ -24,7 +24,7 @@ from .config import Config
 @dataclass
 class Stall:
     session_id: str
-    kind: str  # "post_fence" | "pre_fence"
+    kind: str  # "post_fence" | "pre_fence" | "paused"
     detail: str
     attribution: str  # "provider" | "tool" | "infrastructure" | "unknown"
     evidence: list[str] = field(default_factory=list)
@@ -90,7 +90,28 @@ def find_stalls(conn: sqlite3.Connection, events: list[logs.Event], now: float, 
             attribution=attribution.kind, evidence=attribution.evidence,
             last_progress_ts=last, stalled_for=stalled_for,
         ))
+
+    _add_paused(events, now, cfg, stalls)
     return stalls
+
+
+def _add_paused(events: list[logs.Event], now: float, cfg: Config, stalls: list[Stall]) -> None:
+    """Report a session the host paused (``... paused: admission_conflict`` / ``runtime_draining``).
+
+    These lines never reach an admission row and carry no ``[sid]`` bracket, so the store lookups
+    above miss them. Report only — a paused session is never interrupted.
+    """
+    seen = {item.session_id for item in stalls}
+    for session_id, reason, ts in logs.paused_sessions(events, since=now - cfg.max_age_seconds):
+        if session_id in seen:
+            continue
+        seen.add(session_id)
+        stalls.append(Stall(
+            session_id=session_id, kind="paused", admission_status=None,
+            detail=f"session paused: {reason}",
+            attribution="infrastructure" if "drain" in reason else "unknown",
+            evidence=[f"{reason} at {ts:.0f}"],
+        ))
 
 
 def hermes_bin() -> str | None:

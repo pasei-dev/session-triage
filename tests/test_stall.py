@@ -80,5 +80,13 @@ class StallTest(unittest.TestCase):
         self.assertTrue(stall.fence_resolved(conn2, "s1"))
 
 
+    def test_paused_line_is_reported(self):
+        conn = self._db([])
+        events = self._events([_line(self.now - 30, None, "gateway.session_local_recovery",
+                                     "Local session sX paused: admission_conflict", level="WARNING")])
+        found = stall.find_stalls(conn, events, self.now, Config())
+        self.assertEqual([(item.session_id, item.kind) for item in found], [("sX", "paused")])
+
+
 if __name__ == "__main__":
     unittest.main()

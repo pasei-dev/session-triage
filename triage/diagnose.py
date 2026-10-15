@@ -21,6 +21,9 @@ _CREDENTIAL_MARKERS = ("launch_credentials_unavailable", "recover_config_secrets
                        "session_policy_credentials")
 _WORKSPACE_MARKERS = ("workspace_unavailable",)
 
+#: The workspace checkpoint store's per-index lock files — a stale one wedges the file-write path.
+_CHECKPOINT_LOCK_GLOBS = ("checkpoints/store/indexes/*.lock",)
+
 
 def _free_mb(path: str | os.PathLike[str]) -> float | None:
     probe = Path(path)
@@ -30,6 +33,31 @@ def _free_mb(path: str | os.PathLike[str]) -> float | None:
         return shutil.disk_usage(probe).free / (1024 * 1024)
     except OSError:
         return None
+
+
+def _db_size_mb(home: Path) -> float | None:
+    try:
+        return (home / "state.db").stat().st_size / (1024 * 1024)
+    except OSError:
+        return None
+
+
+def _stale_checkpoint_lock(home: Path, now: float, cfg: Config) -> str | None:
+    """The name of a checkpoint index lock older than the bound, or ``None``.
+
+    A wedged ``git add -A`` (``index.lock: File exists``) is what stretches a file-write call from
+    seconds to tens of minutes. The lock is reported, never deleted — the plugin does not touch
+    another process's lock.
+    """
+    for pattern in _CHECKPOINT_LOCK_GLOBS:
+        for lock in sorted(home.glob(pattern)):
+            try:
+                age = now - lock.stat().st_mtime
+            except OSError:
+                continue
+            if age > cfg.checkpoint_lock_stale_seconds:
+                return f"{lock.name} stale for {age:.0f}s"
+    return None
 
 
 def _log_hits(errors_log: Path, markers: tuple[str, ...], now: float, cfg: Config) -> bool:
@@ -76,7 +104,7 @@ def diagnose(
         result.blocking.append("workspace_unavailable")
 
     sess = db.session_row(conn, session_id) or {}
-    streak = sess.get("compression_failure_streak") or 0
+    streak = sess.get("compression_fallback_streak") or 0
     deadline = sess.get("compression_recovery_deadline") or 0
     if streak or (deadline and float(deadline) > now):
         result.causes.append("context_overload")
@@ -86,6 +114,20 @@ def diagnose(
     if heartbeat is not None and (now - heartbeat) > cfg.gateway_stale_seconds:
         result.causes.append("gateway_stale")
         result.notes.append(f"gateway heartbeat is {now - heartbeat:.0f}s old")
+
+    # A bloated store and a wedged checkpoint lock are the two local conditions behind a slow or
+    # stalled turn. Both are reported, never repaired: neither makes resuming impossible, so neither
+    # blocks — but the resumed turn is told about them.
+    size_mb = _db_size_mb(home)
+    if size_mb is not None and size_mb > cfg.state_db_warn_mb:
+        result.causes.append("database_bloat")
+        result.notes.append(
+            f"state.db is {size_mb:.0f} MB (> {cfg.state_db_warn_mb} MB); reads and checkpoints are slow"
+        )
+    lock = _stale_checkpoint_lock(home, now, cfg)
+    if lock:
+        result.causes.append("checkpoint_lock")
+        result.notes.append(f"stale workspace checkpoint lock: {lock}")
 
     if not result.causes:
         result.notes.append("no background cause found")

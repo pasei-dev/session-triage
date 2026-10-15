@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+#: Prefix that marks a resume turn this plugin injected, so the engine never mistakes its own
+#: note for a real user message (see ``db.max_user_ts`` and ``resume.build_prompt``).
+RESUME_SENTINEL = "[session-triage]"
+
 
 @dataclass
 class Candidate:
